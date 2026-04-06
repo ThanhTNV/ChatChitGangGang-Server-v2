@@ -47,7 +47,11 @@ func HandleWebSocket(log *slog.Logger, v *auth.Validator, repo user.Sync) http.H
 			log.Debug("ws upgrade", "error", err)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				log.Debug("ws close", "error", err)
+			}
+		}()
 
 		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		for {
