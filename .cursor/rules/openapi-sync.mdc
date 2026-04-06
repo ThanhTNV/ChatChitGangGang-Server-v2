@@ -1,0 +1,12 @@
+---
+description: Keep the embedded OpenAPI spec in sync when HTTP APIs change.
+globs: internal/httpserver/**/*.go, internal/apiembed/openapi.yaml
+alwaysApply: false
+---
+
+# OpenAPI sync
+
+- **Canonical spec:** `internal/apiembed/openapi.yaml` (OpenAPI 3.0.x). `go:embed` requires the file to live under the package directory (no `..` paths). It is served at `GET /openapi.yaml` and browsed at `GET /docs` (Swagger UI).
+- **When adding or changing** a public HTTP route, status codes, JSON shape, query params, or auth: update `internal/apiembed/openapi.yaml` in the same change (paths, `components.schemas`, security schemes).
+- **WebSocket:** document connect parameters and HTTP error responses before upgrade in the same spec path; when message payloads are defined later, extend the description or add an AsyncAPI doc if the team adopts it.
+- **Do not** hand-edit generated-only artifacts; this file is source.

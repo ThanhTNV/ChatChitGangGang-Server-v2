@@ -1,0 +1,58 @@
+---
+description: Production-ready Go standards for Internal Comm backend
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go — production & enterprise conventions
+
+## Architecture
+
+- Prefer **explicit dependencies** (constructor injection); avoid global mutable state except process-wide config set once at startup.
+- Keep **domain logic** free of HTTP/WS/DB types; adapters live in `internal/`.
+- Define **small interfaces at the call site** (e.g. `MessageStore` with only methods the service needs).
+
+## Context, errors, and control flow
+
+- Every outward call that can block must accept `context.Context` and honor cancellation/timeouts.
+- Return errors; **do not `panic`** in request paths or libraries. Use `panic` only for unrecoverable programmer errors in `init` or tests if needed.
+- Wrap errors with context: `fmt.Errorf("load user: %w", err)`. Expose stable **sentinel errors** (`errors.Is` / `errors.As`) for API mapping.
+
+```go
+// ❌ BAD — silent failure
+if err != nil { return nil }
+
+// ✅ GOOD
+if err != nil {
+    return nil, fmt.Errorf("repository.GetUser: %w", err)
+}
+```
+
+## Concurrency
+
+- Prefer **bounded** worker pools or semaphores over unbounded goroutines per request.
+- Share state with channels or sync primitives; document invariants. Run tests with **`-race`**.
+
+## HTTP / servers
+
+- Set **Server** timeouts: `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`. Use `http.Server.Shutdown(ctx)` on SIGTERM.
+- Validate and bound input (body size, field lengths). Return **consistent JSON error** shapes for clients; map domain errors to correct status codes.
+
+## Observability
+
+- Use **structured logging** (`slog` or Zap): request ID, user id (if known), error chain. Never log secrets, full JWTs, or presigned query strings.
+- Expose **`/health` (liveness)** and **`/ready` (dependencies)** for Kubernetes.
+
+## Security
+
+- No credentials in source; read from **environment** or mounted secrets only.
+- Use **parameterized SQL** (`pgx`/driver args); never string-concatenate user input into queries.
+
+## Tests and quality
+
+- **Table-driven** unit tests for pure logic; integration tests with real Postgres/Redis via Testcontainers where valuable.
+- Run `go vet`, `golangci-lint`, and `go test -race ./...` in CI. Keep exported APIs documented only where non-obvious.
+
+## Module hygiene
+
+- Pin versions in `go.mod`; run `go mod tidy`. Avoid unnecessary `replace` directives in committed code unless documented.

@@ -1,0 +1,268 @@
+openapi: 3.0.3
+info:
+  title: Internal Comm Backend API
+  description: |
+    HTTP API for the Internal Comm backend (health, readiness, OpenAPI + Swagger UI, authenticated profile, WebSocket entry).
+    When Keycloak env vars are unset, `/v1/*` routes are not mounted; `/health`, `/ready`, `/openapi.yaml`, and `/docs` remain available.
+  version: 0.1.0
+
+servers:
+  - url: /
+    description: Relative to the server base URL
+
+tags:
+  - name: Health
+    description: Liveness and readiness
+  - name: Profile
+    description: Authenticated user (requires Keycloak + `/v1` enabled)
+  - name: WebSocket
+    description: Real-time entry (stub until chat section E)
+  - name: Chat
+    description: Channels and messages (REST)
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      operationId: getHealth
+      responses:
+        "200":
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      operationId: getReady
+      description: |
+        When `DATABASE_URL` is configured, checks Postgres connectivity.
+        Otherwise reports `database: skipped`.
+      responses:
+        "200":
+          description: Ready to serve traffic (or DB optional skipped)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+        "503":
+          description: Dependency check failed (e.g. Postgres ping failed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponseError"
+
+  /openapi.yaml:
+    get:
+      tags: [Health]
+      summary: OpenAPI document (this spec)
+      operationId: getOpenAPISpec
+      responses:
+        "200":
+          description: OpenAPI 3 YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+                format: binary
+
+  /v1/me:
+    get:
+      tags: [Profile]
+      summary: Current user from JWT
+      operationId: getMe
+      description: |
+        Requires `Authorization: Bearer <access_token>`. Upserts `users` row from `sub` and profile claims.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Authenticated principal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: User upsert failed after valid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/channels:
+    get:
+      tags: [Chat]
+      summary: List channels for the current user
+      operationId: listChannels
+      description: |
+        Returns channels where the authenticated user is a member (`channel_members`).
+        Empty list if the user has no memberships. Ordered by `created_at` descending.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Membership-filtered channel list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelListResponse"
+        "401":
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database or internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/ws:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket upgrade (authenticated)
+      operationId: connectWebSocket
+      description: |
+        Validates JWT then upgrades to WebSocket.
+
+        **Token delivery (no `Authorization` header):**
+        - Query: `access_token=<JWT>`
+        - Or header `Sec-WebSocket-Protocol` containing a single value `bearer.<JWT>` (JWT must not be split on commas).
+
+        On validation failure before upgrade, returns **401** with plain text body.
+      parameters:
+        - name: access_token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Keycloak access token (preferred for browser/mobile WS)
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket established (not exercised in Swagger UI)
+        "401":
+          description: Missing or invalid token
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid token
+        "500":
+          description: User upsert failed after valid token
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: user sync failed
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Keycloak access token (`openid` / `profile` / `email` scopes recommended)
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ReadyResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          example: ok
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            database: ok
+
+    ReadyResponseError:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          example: error
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+
+    MeResponse:
+      type: object
+      required: [user_id, sub]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Internal user row id
+        sub:
+          type: string
+          description: Keycloak subject (`sub` claim)
+        email:
+          type: string
+          description: From token claims (may be empty string)
+        preferred_username:
+          type: string
+          description: From token claims (may be empty string)
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: missing bearer token
+          description: >-
+            Typical values include `missing bearer token`, `invalid token`, `unauthorized`, `user sync failed`.
+
+    Channel:
+      type: object
+      required: [id, name, type, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [direct, group]
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ChannelListResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Channel"

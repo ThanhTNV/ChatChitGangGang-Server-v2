@@ -1,0 +1,37 @@
+# Secrets and local env (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# Go build / test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/
+
+# Coverage / profiling
+*.cover
+*.coverprofile
+coverage.html
+coverage.out
+cpu.prof
+mem.prof
+
+# IDE / editor
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Delve / IDE debug binaries
+__debug_bin
+__debug_bin*

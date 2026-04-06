@@ -1,0 +1,7 @@
+.git
+.github
+output
+.cursor
+*.md
+.env
+.env.*
