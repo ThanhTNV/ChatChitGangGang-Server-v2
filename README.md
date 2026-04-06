@@ -1,3 +1,5 @@
+[![ci](https://github.com/ThanhTNV/ChatChitGangGang-Server-v2/actions/workflows/ci.yml/badge.svg)](https://github.com/ThanhTNV/ChatChitGangGang-Server-v2/actions/workflows/ci.yml)
+[![release](https://github.com/ThanhTNV/ChatChitGangGang-Server-v2/actions/workflows/release.yml/badge.svg)](https://github.com/ThanhTNV/ChatChitGangGang-Server-v2/actions/workflows/release.yml)
 # Internal Comm Backend
 
 Go service for an internal communications backend: HTTP API with optional **Keycloak (OIDC/JWT)** auth, **PostgreSQL** for users/channels/messages, and a **WebSocket** entry point (real-time features are still evolving). Structured logging uses **`slog`**; routing uses **[chi](https://github.com/go-chi/chi)**.
