@@ -71,7 +71,11 @@ func run() error {
 	var redisCli *redis.Client
 	if cfg.RedisAddr != "" {
 		redisCli = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
-		defer redisCli.Close()
+		defer func() {
+			if err := redisCli.Close(); err != nil {
+				log.Error("failed to close redis client", "error", err)
+			}
+		}()
 		log.Info("redis configured for readiness", "addr", cfg.RedisAddr)
 	}
 
