@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,5 +50,37 @@ func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Chann
 	return out, nil
 }
 
-// Ensure Repository implements Lister.
-var _ Lister = (*Repository)(nil)
+// CreateGroup inserts a `group` channel with created_by = userID and adds the user as `admin` in channel_members.
+func (r *Repository) CreateGroup(ctx context.Context, userID uuid.UUID, name string) (Channel, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Channel{}, fmt.Errorf("begin channel create: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var c Channel
+	err = tx.QueryRow(ctx, `
+		INSERT INTO channels (name, type, created_by)
+		VALUES ($1, 'group', $2)
+		RETURNING id, name, type, created_by, created_at
+	`, name, userID).Scan(&c.ID, &c.Name, &c.Type, &c.CreatedBy, &c.CreatedAt)
+	if err != nil {
+		return Channel{}, fmt.Errorf("insert channel: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO channel_members (channel_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+	`, c.ID, userID)
+	if err != nil {
+		return Channel{}, fmt.Errorf("insert channel member: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Channel{}, fmt.Errorf("commit channel create: %w", err)
+	}
+	return c, nil
+}
+
+// Ensure Repository implements Store.
+var _ Store = (*Repository)(nil)

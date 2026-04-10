@@ -6,6 +6,7 @@ info:
     When Keycloak env vars are unset, `/v1/*` routes are not mounted; `/health`, `/ready`, `/openapi.yaml`, and `/docs` remain available.
   version: 0.1.0
 
+# Default servers block (served URL may be replaced per request). Keep in sync with httpserver.openAPIServersRelative.
 servers:
   - url: /
     description: Relative to the server base URL
@@ -40,17 +41,22 @@ paths:
       summary: Readiness probe
       operationId: getReady
       description: |
-        When `DATABASE_URL` is configured, checks Postgres connectivity.
-        Otherwise reports `database: skipped`.
+        Aggregates dependency probes in `checks`. Each value is **`ok`**, **`skipped`**, or **`error`**:
+        - **database** — Postgres ping when `DATABASE_URL` is set; otherwise `skipped`.
+        - **redis** — Redis `PING` when `REDIS_ADDR` is set at process startup; otherwise `skipped`.
+        - **keycloak** — HTTP GET `KEYCLOAK_READY_URL` when set, else `KEYCLOAK_ISSUER` when set; otherwise `skipped`. (Keycloak 26+ serves `/health/ready` on the **management port**, default **9000**, not the main HTTP port.)
+        - **minio** — HTTP GET `MINIO_USE_SSL` + `MINIO_ENDPOINT` → `{http|https}://<host>/minio/health/live` when `MINIO_ENDPOINT` is set; otherwise `skipped`.
+
+        **503** when any configured (non-skipped) check fails (`error`). **200** when none are `error`.
       responses:
         "200":
-          description: Ready to serve traffic (or DB optional skipped)
+          description: No failing checks (skipped checks do not cause failure)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyResponse"
         "503":
-          description: Dependency check failed (e.g. Postgres ping failed)
+          description: One or more configured checks returned error
           content:
             application/json:
               schema:
@@ -128,6 +134,111 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [Chat]
+      summary: Create a group channel
+      operationId: createChannel
+      description: |
+        Creates a **group** channel, sets `created_by` to the caller, and adds the caller as an **admin** member.
+        Type `direct` is not supported in this API version.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+      responses:
+        "201":
+          description: Channel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          description: Invalid body or unsupported type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database or internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/channels/{channelID}/messages:
+    get:
+      tags: [Chat]
+      summary: List messages in a channel (cursor pagination)
+      operationId: listChannelMessages
+      description: |
+        Returns messages for the channel **only if** the authenticated user is a member (`channel_members`).
+        Newest messages first. Use **`next_cursor`** from the previous response as the **`cursor`** query parameter for the next page.
+        If the user is not a member (or the channel does not exist), returns **404** with `{"error":"channel not found"}`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channelID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque cursor from a prior `next_cursor` (omit for the first page)
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Page size (default 50, max 100)
+      responses:
+        "200":
+          description: Message page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageListResponse"
+        "400":
+          description: Invalid channel id, limit, or cursor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User is not a member or channel does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database or internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/ws:
     get:
@@ -193,10 +304,14 @@ components:
           example: ok
         checks:
           type: object
+          description: Keys may include database, redis, keycloak, minio — values ok, skipped, or error
           additionalProperties:
             type: string
           example:
             database: ok
+            redis: ok
+            keycloak: skipped
+            minio: ok
 
     ReadyResponseError:
       type: object
@@ -209,6 +324,11 @@ components:
           type: object
           additionalProperties:
             type: string
+          example:
+            database: ok
+            redis: error
+            keycloak: skipped
+            minio: ok
 
     MeResponse:
       type: object
@@ -266,3 +386,54 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Channel"
+
+    CreateChannelRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 256
+          description: Display name (trimmed; max 256 Unicode code points)
+        type:
+          type: string
+          enum: [group]
+          default: group
+          description: Must be `group` (omit or empty defaults to `group`)
+
+    Message:
+      type: object
+      required: [id, channel_id, sender_id, body, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        sender_id:
+          type: string
+          format: uuid
+        body:
+          type: object
+          additionalProperties: true
+          description: Arbitrary JSON payload (stored as JSONB)
+        created_at:
+          type: string
+          format: date-time
+        edited_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    MessageListResponse:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        next_cursor:
+          type: string
+          description: Present when more older messages exist; pass as `cursor` on the next request

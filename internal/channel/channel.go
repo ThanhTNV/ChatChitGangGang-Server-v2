@@ -16,7 +16,15 @@ type Channel struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-// Lister returns channels visible to a user (implemented by Repository).
-type Lister interface {
+// CreateChannelRequest is the JSON body for POST /v1/channels.
+type CreateChannelRequest struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// Store lists and creates channels for authenticated users (implemented by Repository).
+type Store interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Channel, error)
+	// CreateGroup inserts a group channel and adds userID as an admin member (transactional).
+	CreateGroup(ctx context.Context, userID uuid.UUID, name string) (Channel, error)
 }

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/chatchitganggang/internal-comm-backend/internal/auth"
 	"github.com/chatchitganggang/internal-comm-backend/internal/channel"
+	"github.com/chatchitganggang/internal-comm-backend/internal/chat"
 	"github.com/chatchitganggang/internal-comm-backend/internal/config"
 	"github.com/chatchitganggang/internal-comm-backend/internal/httpserver"
 	"github.com/chatchitganggang/internal-comm-backend/internal/user"
@@ -53,6 +55,7 @@ func run() error {
 		}
 		users := user.NewRepository(dbPool)
 		chans := channel.NewRepository(dbPool)
+		msgs := chat.NewRepository(dbPool)
 		jwks := auth.NewJWKSStore(cfg.KeycloakJWKSURL, nil)
 		v := auth.NewValidator(jwks, cfg.KeycloakIssuer, cfg.KeycloakAudience, 30*time.Second)
 		authDeps = &httpserver.Auth{
@@ -60,11 +63,19 @@ func run() error {
 			Validator: v,
 			Users:     users,
 			Channels:  chans,
+			Messages:  msgs,
 		}
 		log.Info("keycloak auth enabled", "issuer", cfg.KeycloakIssuer, "jwks", cfg.KeycloakJWKSURL)
 	}
 
-	srv := httpserver.New(cfg, log, dbPool, authDeps)
+	var redisCli *redis.Client
+	if cfg.RedisAddr != "" {
+		redisCli = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+		defer redisCli.Close()
+		log.Info("redis configured for readiness", "addr", cfg.RedisAddr)
+	}
+
+	srv := httpserver.New(cfg, log, dbPool, authDeps, httpserver.Deps{Redis: redisCli})
 
 	errCh := make(chan error, 1)
 	go func() {

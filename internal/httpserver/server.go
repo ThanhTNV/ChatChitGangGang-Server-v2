@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"github.com/chatchitganggang/internal-comm-backend/internal/apiembed"
 	"github.com/chatchitganggang/internal-comm-backend/internal/auth"
 	"github.com/chatchitganggang/internal-comm-backend/internal/channel"
+	"github.com/chatchitganggang/internal-comm-backend/internal/chat"
 	"github.com/chatchitganggang/internal-comm-backend/internal/config"
 	"github.com/chatchitganggang/internal-comm-backend/internal/user"
 )
@@ -23,17 +23,18 @@ type Auth struct {
 	Bearer    func(http.Handler) http.Handler
 	Validator *auth.Validator
 	Users     user.Sync
-	Channels  channel.Lister
+	Channels  channel.Store
+	Messages  chat.Store
 }
 
 // New builds an HTTP server with routing and production-oriented timeouts.
-// db may be nil; /ready skips the database check in that case.
-func New(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool, a *Auth) *http.Server {
+// db may be nil; /ready marks database as skipped. Optional deps (e.g. Redis) extend /ready.
+func New(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool, a *Auth, deps Deps) *http.Server {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, requestLogger(log), chimw.Recoverer)
 	r.Get("/health", health)
-	r.Get("/ready", readyHandler(db, log))
-	RegisterOpenAPISpec(r, apiembed.OpenAPIYAML)
+	r.Get("/ready", readyHandler(cfg, db, deps, log))
+	RegisterOpenAPISpec(r, cfg, apiembed.OpenAPIYAML)
 
 	if a != nil && a.Bearer != nil && a.Validator != nil && a.Users != nil {
 		r.Route("/v1", func(r chi.Router) {
@@ -42,6 +43,8 @@ func New(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool, a *Auth) *http.
 				r.Use(a.Bearer)
 				r.Get("/me", handleMe)
 				r.Get("/channels", listChannelsHandler(a.Channels, log))
+				r.Post("/channels", createChannelHandler(a.Channels, log))
+				r.Get("/channels/{channelID}/messages", listChannelMessagesHandler(a.Messages, log))
 			})
 			r.Get("/ws", HandleWebSocket(log, a.Validator, a.Users))
 		})
@@ -59,34 +62,6 @@ func New(cfg *config.Config, log *slog.Logger, db *pgxpool.Pool, a *Auth) *http.
 
 func health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func readyHandler(db *pgxpool.Pool, log *slog.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-
-		checks := map[string]string{"database": "skipped"}
-		if db != nil {
-			if err := db.Ping(ctx); err != nil {
-				log.LogAttrs(r.Context(), slog.LevelWarn, "ready_check_failed",
-					slog.String("check", "database"),
-					slog.Any("error", err),
-				)
-				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-					"status": "error",
-					"checks": map[string]string{"database": "error"},
-				})
-				return
-			}
-			checks["database"] = "ok"
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-			"checks": checks,
-		})
-	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

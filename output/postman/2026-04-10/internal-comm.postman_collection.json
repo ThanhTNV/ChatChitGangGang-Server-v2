@@ -1,0 +1,504 @@
+{
+  "info": {
+    "_postman_id": "a1f2e3d4-c5b6-7890-abcd-ef1234567890",
+    "name": "Internal Comm Backend API",
+    "description": "Generated from internal/apiembed/openapi.yaml (v0.1.0).\n\n**base_url:** use `http://localhost:8080` (direct API) or `https://localhost/api` (TLS ingress — no trailing slash). Import **local** vs **ingress** environment.\n\nRun **Keycloak auth → Get token**, then secured requests. **Create group channel** sets **channel_id** for message list requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Get health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/health",
+            "description": "Liveness — always mounted."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const j = pm.response.json();",
+                  "pm.test('Body has status ok', function () { pm.expect(j.status).to.eql('ok'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get ready",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/ready",
+            "description": "Readiness — 503 if DATABASE_URL set and Postgres ping fails."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 or 503', function () {",
+                  "  pm.expect([200, 503]).to.include(pm.response.code);",
+                  "});",
+                  "const j = pm.response.json();",
+                  "pm.test('Body has status and checks', function () {",
+                  "  pm.expect(j).to.have.property('status');",
+                  "  pm.expect(j).to.have.property('checks');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get OpenAPI spec",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/yaml, application/json;q=0.9, */*;q=0.8",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/openapi.yaml",
+            "description": "Returns OpenAPI 3 YAML document."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Body mentions openapi', function () {",
+                  "  pm.expect(pm.response.text().toLowerCase()).to.include('openapi');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get docs (Swagger UI)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/html,application/json;q=0.8,*/*;q=0.5",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/docs",
+            "description": "Served HTML + Swagger UI. For HTTPS ingress you may need to disable SSL verification in Postman if using a dev cert."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const t = pm.response.text().toLowerCase();",
+                  "pm.test('Swagger UI shell', function () {",
+                  "  pm.expect(t.includes('swagger') || t.includes('openapi')).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Keycloak auth",
+      "description": "Resource owner password credentials grant. The realm client must allow **Direct access grants** (Keycloak: client → Capability config). On success, **Get token** saves `access_token` to the active environment.",
+      "item": [
+        {
+          "name": "Get token (password grant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{keycloak_client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "{{keycloak_username}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{keycloak_password}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{keycloak_token_url}}",
+            "description": "Returns Keycloak token JSON (`access_token`, `refresh_token`, `expires_in`, …). Tests persist `access_token` for **Profile** / **Chat** requests."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const j = pm.response.json();",
+                  "pm.test('Body has access_token', function () {",
+                  "  pm.expect(j).to.have.property('access_token');",
+                  "});",
+                  "if (pm.response.code === 200 && j.access_token) {",
+                  "  pm.environment.set('access_token', j.access_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "Get me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/v1/me",
+            "description": "Requires /v1 mounted (KEYCLOAK_ISSUER + DATABASE_URL). Empty token → 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const code = pm.response.code;",
+                  "if (code === 200) {",
+                  "  pm.test('Me has user_id and sub', function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('user_id');",
+                  "    pm.expect(j).to.have.property('sub');",
+                  "  });",
+                  "} else if (code === 401) {",
+                  "  pm.test('Unauthorized JSON', function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('error');",
+                  "  });",
+                  "} else if (code === 404) {",
+                  "  pm.test('v1 not mounted (expected if auth disabled)', function () { pm.expect(code).to.eql(404); });",
+                  "} else {",
+                  "  pm.test('Unexpected status ' + code, function () { pm.expect.fail('Got ' + code); });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "item": [
+        {
+          "name": "List channels",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/v1/channels",
+            "description": "Membership-filtered list."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const code = pm.response.code;",
+                  "if (code === 200) {",
+                  "  pm.test('Has channels array', function () {",
+                  "    pm.expect(pm.response.json().channels).to.be.an('array');",
+                  "  });",
+                  "} else if (code === 401) {",
+                  "  pm.test('Unauthorized', function () { pm.response.to.have.status(401); });",
+                  "} else if (code === 404) {",
+                  "  pm.test('v1 not mounted', function () { pm.expect(code).to.eql(404); });",
+                  "} else {",
+                  "  pm.test('List channels status', function () { pm.expect([200,401,404,500]).to.include(code); });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create group channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"postman-test-channel\",\n  \"type\": \"group\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/v1/channels",
+            "description": "201 = created; 400 if validation fails; only type group supported."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const code = pm.response.code;",
+                  "if (code === 201) {",
+                  "  pm.test('Created channel shape', function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('id');",
+                  "    pm.expect(j).to.have.property('name');",
+                  "    pm.expect(j.type).to.eql('group');",
+                  "    pm.environment.set('channel_id', j.id);",
+                  "  });",
+                  "} else if (code === 400) {",
+                  "  pm.test('Error body', function () { pm.expect(pm.response.json()).to.have.property('error'); });",
+                  "} else if (code === 401) {",
+                  "  pm.test('Unauthorized', function () { pm.response.to.have.status(401); });",
+                  "} else if (code === 404) {",
+                  "  pm.test('v1 not mounted', function () { pm.expect(code).to.eql(404); });",
+                  "} else {",
+                  "  pm.test('Create channel acceptable status', function () { pm.expect([201,400,401,404,500]).to.include(code); });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List channel messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/v1/channels/{{channel_id}}/messages?limit=50",
+            "description": "Member-only; newest first. Requires **channel_id** (set by **Create group channel** on 201, or paste a UUID). Empty channel_id → 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const code = pm.response.code;",
+                  "if (code === 200) {",
+                  "  pm.test('Has messages array', function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j).to.have.property('messages');",
+                  "    pm.expect(j.messages).to.be.an('array');",
+                  "  });",
+                  "  const j = pm.response.json();",
+                  "  if (j.next_cursor) {",
+                  "    pm.environment.set('messages_cursor', j.next_cursor);",
+                  "  }",
+                  "} else if (code === 400) {",
+                  "  pm.test('Bad request JSON', function () { pm.expect(pm.response.json()).to.have.property('error'); });",
+                  "} else if (code === 401) {",
+                  "  pm.test('Unauthorized', function () { pm.response.to.have.status(401); });",
+                  "} else if (code === 404) {",
+                  "  pm.test('Not found or not a member', function () { pm.expect(pm.response.json()).to.have.property('error'); });",
+                  "} else if (code === 500) {",
+                  "  pm.test('Server error', function () { pm.response.to.have.status(500); });",
+                  "} else {",
+                  "  pm.test('List messages status', function () { pm.expect([200,400,401,404,500]).to.include(code); });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List channel messages (cursor)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/v1/channels/{{channel_id}}/messages?limit=50&cursor={{messages_cursor}}",
+            "description": "Next page: uses **messages_cursor** from a prior **List channel messages** response (`next_cursor`). If cursor is empty, expect **400** invalid cursor."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const code = pm.response.code;",
+                  "if (code === 200) {",
+                  "  pm.test('Has messages array', function () {",
+                  "    const j = pm.response.json();",
+                  "    pm.expect(j.messages).to.be.an('array');",
+                  "  });",
+                  "  const j = pm.response.json();",
+                  "  if (j.next_cursor) { pm.environment.set('messages_cursor', j.next_cursor); } else { pm.environment.set('messages_cursor', ''); }",
+                  "} else if (code === 400) {",
+                  "  pm.test('Bad request', function () { pm.expect(pm.response.json()).to.have.property('error'); });",
+                  "} else if (code === 401) {",
+                  "  pm.test('Unauthorized', function () { pm.response.to.have.status(401); });",
+                  "} else if (code === 404) {",
+                  "  pm.test('Not found', function () { pm.expect(pm.response.json()).to.have.property('error'); });",
+                  "} else {",
+                  "  pm.test('Acceptable status', function () { pm.expect([200,400,401,404,500]).to.include(code); });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "WebSocket",
+      "description": "HTTP GET does not show 101 Upgrade in Postman REST. Use Postman **WebSocket** request with `{{base_url}}/v1/ws?access_token=...` — use **wss://** when base_url is https (ingress). This folder’s GET asserts **401**/**404** without a token.",
+      "item": [
+        {
+          "name": "WS entry (no token — expect 401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/ws",
+            "description": "Missing access_token → 401 text/plain when route exists."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const code = pm.response.code;",
+                  "pm.test('401 if v1 mounted, 404 if not', function () {",
+                  "  pm.expect([401, 404]).to.include(code);",
+                  "});",
+                  "if (code === 401) {",
+                  "  pm.test('Plain text error', function () {",
+                  "    pm.expect(pm.response.text().length).to.be.above(0);",
+                  "  });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

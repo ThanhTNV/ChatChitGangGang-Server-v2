@@ -6,7 +6,7 @@ This backend validates **JWT access tokens** from Keycloak using **JWKS** (`KEYC
 
 | Variable | Purpose |
 |----------|---------|
-| `KEYCLOAK_ISSUER` | Must match JWT `iss` exactly (e.g. `http://localhost:8090/realms/<realm>`). If **unset**, `/v1/*` routes are **not** mounted (auth disabled). |
+| `KEYCLOAK_ISSUER` | Must match JWT `iss` exactly. **Direct Keycloak:** `http://localhost:8090/realms/<realm>`. **TLS ingress:** `https://localhost/oauth/realms/<realm>` (see repo `README.md`). If **unset**, `/v1/*` routes are **not** mounted (auth disabled). |
 | `KEYCLOAK_AUDIENCE` | Expected **resource** audience **or** OAuth2 **`azp`** (authorized party / client id). Public mobile clients often only have `azp` set to the client id — use that value here. |
 | `KEYCLOAK_JWKS_URL` | Optional. Default: `{issuer}/protocol/openid-connect/certs` |
 | `DATABASE_URL` | **Required** when `KEYCLOAK_ISSUER` is set (user upsert on each authenticated call). |
@@ -58,6 +58,6 @@ Alternative: `Sec-WebSocket-Protocol` value `bearer.<access_token>` (single prot
 
 ## Keycloak admin (local compose)
 
-- Admin console: `http://localhost:8090` (default bootstrap user from `docker-compose.yml`).
+- Admin console (direct): `http://localhost:8090/admin/` (ingress: `https://localhost/oauth/admin/`). Default bootstrap user from `docker-compose.yml`.
 
-After creating the realm, set `KEYCLOAK_ISSUER` to `http://localhost:8090/realms/<your-realm>` (or your public URL in production).
+After creating the realm, set `KEYCLOAK_ISSUER` to match how clients obtain tokens: `http://localhost:8090/realms/<your-realm>` (direct) or `https://<host>/oauth/realms/<your-realm>` (ingress).

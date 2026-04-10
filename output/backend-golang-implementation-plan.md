@@ -161,8 +161,8 @@ Use these as the single source of truth for backend implementation status. Check
 ## D. Chat REST
 
 - [x] `GET /v1/channels` (membership-filtered)
-- [ ] `POST /v1/channels` (policy: who can create)
-- [ ] `GET /v1/channels/{id}/messages` cursor pagination
+- [x] `POST /v1/channels` (policy: who can create)
+- [x] `GET /v1/channels/{id}/messages` cursor pagination
 - [ ] Authorization: only members read/write channel
 
 ## E. Real-time (WebSocket + Redis)
@@ -190,7 +190,7 @@ Use these as the single source of truth for backend implementation status. Check
 
 ## H. Observability & ops
 
-- [ ] `/health` (liveness) and `/ready` (DB + Redis)
+- [x] `/health` (liveness) and `/ready` (DB + Redis + Keycloak issuer + MinIO health when configured)
 - [ ] Prometheus metrics: active WS, messages/sec, Redis errors, DB latency
 - [ ] OpenTelemetry traces for HTTP handlers (optional)
 - [ ] Helm chart values for replicas, resources, env

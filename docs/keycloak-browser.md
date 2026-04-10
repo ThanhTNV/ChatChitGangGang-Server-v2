@@ -12,6 +12,27 @@ This complements [keycloak-flutter.md](./keycloak-flutter.md). The Internal Comm
 
 A user can have a **valid SSO session** at Keycloak but **no access token** in your SPA until you run the code flow again or use silent refresh (if you implement it).
 
+## OIDC discovery URL (this repo — direct vs ingress)
+
+Keycloak in Docker listens on **`http://localhost:8090`** with **standard** paths (**`/realms/...`** at the root). TLS **ingress** exposes the **same** server at **`https://<host>/oauth/...`**; nginx strips the `/oauth` prefix and sends **`X-Forwarded-Prefix: /oauth`** so Keycloak emits the right **`issuer`** for browsers.
+
+| How clients reach Keycloak | Discovery document (example realm `master`) | Typical JWT `iss` (must match API `KEYCLOAK_ISSUER`) |
+|----------------------------|---------------------------------------------|------------------------------------------------------|
+| **Direct** (no ingress) | `http://localhost:8090/realms/master/.well-known/openid-configuration` | `http://localhost:8090/realms/master` |
+| **TLS ingress** | `https://localhost/oauth/realms/master/.well-known/openid-configuration` | `https://localhost/oauth/realms/master` |
+
+Use the discovery URL that matches how **your SPA** talks to Keycloak, and set the API **`KEYCLOAK_ISSUER`** to the same **`issuer`** value from that JSON. You cannot mix token sources (direct vs ingress) against a single API issuer without re-login or a multi-issuer API change.
+
+## CORS from your SPA origin
+
+Browser calls from **`http://localhost:8081`** (or any dev port) to Keycloak are cross-origin. Keycloak only adds **`Access-Control-Allow-Origin`** when the request **Origin** is allowed on the client:
+
+1. Keycloak Admin → **Clients** → your SPA client → **Settings**.
+2. **Web origins** — add **`http://localhost:8081`** (no path; exact origin). Use `+` to add multiple dev origins.
+3. Save. Retry discovery or token calls from the SPA.
+
+If the discovery URL is wrong (404), the response may not include CORS headers, and the console will show a **CORS** error even though the root cause is **404**.
+
 ## Keycloak client (browser / SPA)
 
 1. Create an **OpenID Connect** client (e.g. `internal-comm-web`).
@@ -79,4 +100,4 @@ If the SPA is served from a **different origin** than the Go API (e.g. `localhos
 - Terminate TLS at a reverse proxy that sets CORS headers, or  
 - Add CORS in the Go server in a follow-up change.
 
-Keycloak admin console (local compose): `http://localhost:8090` — see [keycloak-flutter.md](./keycloak-flutter.md).
+Keycloak admin console: **direct** `http://localhost:8090/admin/` — **ingress** `https://localhost/oauth/admin/` — see [keycloak-flutter.md](./keycloak-flutter.md).

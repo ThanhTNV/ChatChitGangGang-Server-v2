@@ -89,6 +89,20 @@ func TestLoad_keycloakIssuerRequiresAudience(t *testing.T) {
 	}
 }
 
+func TestLoad_openAPIPublicBase(t *testing.T) {
+	t.Setenv("OPENAPI_PUBLIC_BASE_URL", "https://app.example/v1/api")
+	t.Setenv("KEYCLOAK_ISSUER", "")
+	t.Setenv("KEYCLOAK_AUDIENCE", "")
+	t.Setenv("KEYCLOAK_JWKS_URL", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OpenAPIPublicBase != "https://app.example/v1/api" {
+		t.Fatalf("OpenAPIPublicBase: %q", cfg.OpenAPIPublicBase)
+	}
+}
+
 func TestLoad_keycloakDerivesJWKSURL(t *testing.T) {
 	t.Setenv("KEYCLOAK_ISSUER", "http://localhost:8090/realms/demo")
 	t.Setenv("KEYCLOAK_AUDIENCE", "api")
