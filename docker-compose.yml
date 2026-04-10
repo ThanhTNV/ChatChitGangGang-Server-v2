@@ -1,19 +1,16 @@
-# Local stack for Internal Comm backend dependencies.
+# Local stack — direct HTTP only (no TLS ingress).
+#
 # Usage:
 #   docker compose up -d
+#   docker compose --profile app up -d --build          # + API on http://localhost:8080
 #   docker compose --profile livekit up -d
-#   docker compose --profile app up -d --build
 #
-# TLS ingress (nginx): requires cert/key on the host (see ingress service). Run with API:
-#   docker compose --profile app --profile ingress up -d --build
+# Keycloak: http://localhost:8090/realms/..., http://localhost:8090/admin/
+# API (with --profile app): http://localhost:8080
 #
-# Default ports: Postgres 5432, Redis 6379, MinIO 9000/9001, Keycloak 8090.
-# With profile ingress: HTTP 80 → 301 HTTPS; HTTPS 443 routes /api/* → api, /oauth/* → Keycloak (TLS only at nginx).
+# For TLS + https://localhost/api and https://localhost/oauth see docker-compose.ingress.yml
 #
-# Host-run API (go run / IDE): use DATABASE_URL with localhost:5432 — Postgres must be up:
-#   docker compose up -d postgres
-#   docker compose ps    # expect 127.0.0.1:5432->5432/tcp
-# API in Compose (profile app): use host `postgres`, not localhost (see `api` service env).
+# Host-run API (go run): docker compose up -d postgres redis minio keycloak — use .env with 127.0.0.1 ports.
 
 services:
   postgres:
@@ -23,7 +20,6 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     ports:
-      # Bind IPv4 loopback so host tools (go run on Windows) reliably reach the container.
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -59,19 +55,15 @@ services:
     volumes:
       - minio_data:/data
 
-  # Keycloak: standard paths at / on :8090 (/realms/..., /admin/...). Ingress maps https://host/oauth/ → keycloak:8080/
-  # with X-Forwarded-Prefix (see deploy/docker/nginx/nginx.conf). Do NOT set KC_HTTP_RELATIVE_PATH here — it must match nginx.
+  # Keycloak at / on :8090 (standard /realms/..., /admin/...). No HTTP relative path — matches direct browser URLs.
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     command:
       - start-dev
       - --http-port=8080
+      - --http-host=0.0.0.0
       - --hostname-strict=false
     environment:
-      # TLS terminates at nginx; Keycloak sees HTTP from the proxy and must trust X-Forwarded-* (set by nginx).
-      # KC_PROXY_HEADERS: xforwarded
-      # KC_HTTP_ENABLED: "true"
-      # KC_HOSTNAME: https://localhost/oauth
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_DB: postgres
@@ -80,12 +72,10 @@ services:
       KC_DB_PASSWORD: postgres
       KC_HEALTH_ENABLED: "true"
     ports:
-      # Direct: http://localhost:8090/realms/...  |  Ingress: https://localhost/oauth/realms/...
       - "8090:8080"
     depends_on:
       postgres:
         condition: service_healthy
-    # Keycloak can take 1–2+ minutes on first boot; without this, nginx often returns 502 until port 8080 listens.
     healthcheck:
       test: ["CMD-SHELL", "cat < /dev/null > /dev/tcp/127.0.0.1/8080"]
       interval: 10s
@@ -95,7 +85,6 @@ services:
     volumes:
       - keycloak_data:/opt/keycloak/data
 
-  # LiveKit SFU — optional; uses extra UDP ports (see profile note below).
   livekit:
     profiles: ["livekit"]
     image: livekit/livekit-server:latest
@@ -109,7 +98,6 @@ services:
     depends_on:
       - redis
 
-  # Build and run the Go API inside Compose (optional).
   api:
     profiles: ["app"]
     build:
@@ -119,15 +107,11 @@ services:
       HTTP_ADDR: ":8080"
       LOG_LEVEL: info
       LOG_FORMAT: json
-      # Issuer = JWT "iss". Ingress + SPA via https://localhost/oauth → use this. Direct Keycloak only → http://localhost:8090/realms/master
-      KEYCLOAK_ISSUER: https://localhost/oauth/realms/master
-      # Must match token "aud" or "azp" (your OIDC client id or audience mapper) — change to your client.
+      KEYCLOAK_ISSUER: http://localhost:8090/realms/master
       KEYCLOAK_AUDIENCE: internal-comm-api
       KEYCLOAK_READY_URL: http://keycloak:9000/health/ready
-      # Internal JWKS always uses /realms/... on Keycloak HTTP port (no /oauth in container path).
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/master/protocol/openid-connect/certs
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/internal_comm?sslmode=disable
-
       REDIS_ADDR: redis:6379
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -144,23 +128,6 @@ services:
         condition: service_started
       minio:
         condition: service_started
-
-  # Nginx ingress: https://host/api/* → api:8080/* ; https://host/oauth/* → keycloak:8080/* (strip /oauth; X-Forwarded-Prefix).
-  # Host cert paths (Windows). sanf.cnf is optional reference for OpenSSL; nginx uses cert.pem + key.pem only.
-  ingress:
-    profiles: ["ingress"]
-    image: nginx:1.27-alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./deploy/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - C:/Users/Admin/cert.pem:/etc/nginx/certs/cert.pem:ro
-      - C:/Users/Admin/key.pem:/etc/nginx/certs/key.pem:ro
-      - C:/Users/Admin/sanf.cnf:/etc/nginx/ssl/sanf.cnf:ro
-    depends_on:
-      keycloak:
-        condition: service_healthy
 
 volumes:
   postgres_data:

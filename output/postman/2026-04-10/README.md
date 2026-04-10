@@ -14,7 +14,7 @@
 | File | When to use | `base_url` | `keycloak_token_url` |
 |------|-------------|------------|------------------------|
 | **`local.postman_environment.json`** | API on the host (`make run`) or **published :8080** (Compose `app` profile) | `http://localhost:8080` | `http://localhost:8090/realms/master/.../token` (direct Keycloak; no `/oauth` on :8090) |
-| **`ingress.postman_environment.json`** | **nginx** TLS ingress (`--profile ingress`): API under **`/api`**, Keycloak under **`/oauth`** | `https://localhost/api` (no trailing slash) | `https://localhost/oauth/realms/master/.../token` |
+| **`ingress.postman_environment.json`** | **nginx** TLS (`docker compose -f docker-compose.yml -f docker-compose.ingress.yml --profile app`) | `https://localhost/api` (no trailing slash) | `https://localhost/oauth/realms/master/.../token` |
 
 **TLS / self-signed:** For `https://localhost`, turn off **SSL certificate verification** in Postman (Settings → General) or add your CA, or Newman `--insecure`.
 

@@ -7,6 +7,15 @@ Go service for an internal communications backend: HTTP API with optional **Keyc
 **Module:** `github.com/chatchitganggang/internal-comm-backend`  
 **Go:** 1.25+
 
+### Docker Compose files
+
+| File | Purpose |
+|------|---------|
+| **`docker-compose.yml`** | Default stack: Postgres, Redis, MinIO, Keycloak (**`http://localhost:8090`** — `/realms/...`, `/admin/...`), optional **`api`** (`--profile app`) on **`http://localhost:8080`**. **No** TLS reverse proxy. |
+| **`docker-compose.ingress.yml`** | **Overlay** — merge with the file above. Adds **nginx** on **80/443**, **`https://localhost/api`**, **`https://localhost/oauth`**. Sets Keycloak **`KC_HTTP_RELATIVE_PATH=/oauth`**, updates API **`KEYCLOAK_ISSUER`** / **`KEYCLOAK_JWKS_URL`**, **`OPENAPI_PUBLIC_BASE_URL`**. Requires TLS cert paths inside that file. |
+
+Nginx config for ingress: **`deploy/docker/nginx/nginx.conf`** (Keycloak **`proxy_pass`** keeps the **`/oauth`** prefix).
+
 ## Features
 
 - `GET /health` — liveness  
@@ -22,13 +31,13 @@ If `KEYCLOAK_ISSUER` is unset, **`/v1/*` is not mounted** (only health, ready, a
 - [Docker Compose](https://docs.docker.com/compose/) (recommended for Postgres, Keycloak, Redis, MinIO locally)  
 - Optional: `golangci-lint` for the same checks as CI  
 
-Keycloak listens on **`http://localhost:8090`** with **standard** OIDC paths (`/realms/...`). Optional TLS **ingress** maps **`https://<host>/oauth/...`** to the same Keycloak (nginx strips `/oauth` and sets **`X-Forwarded-Prefix`**). Set **`KEYCLOAK_ISSUER`** on the API to match how your clients reach Keycloak (see table in [docs/keycloak-browser.md](docs/keycloak-browser.md)).
+Set **`KEYCLOAK_ISSUER`** (and discovery URLs in your SPA) to match **direct** vs **ingress** Keycloak — see [docs/keycloak-browser.md](docs/keycloak-browser.md).
 
 ---
 
 ## Running the stack
 
-Pick **one** primary path: [API on the host (Go)](#option-1-dependencies-in-docker-compose-api-with-go-on-the-host) or [API inside Compose](#option-2-full-stack-in-docker-compose-including-api). TLS ingress is optional and only wired to the **container** API (see [TLS ingress](#optional-tls-ingress-nginx)).
+Pick **one** primary path: [API on the host (Go)](#option-1-dependencies-in-docker-compose-api-with-go-on-the-host) or [API inside Compose](#option-2-full-stack-in-docker-compose-including-api). TLS ingress is a **second Compose file** merged with the first (see [TLS ingress](#tls-ingress-second-compose-file)).
 
 ### Option 1: Dependencies in Docker Compose, API with Go on the host
 
@@ -50,7 +59,7 @@ Edit `.env` so the API reaches **published localhost ports** (not Docker service
 | `MINIO_USE_SSL` | `false` |
 | `KEYCLOAK_ISSUER` | **Direct Keycloak:** `http://localhost:8090/realms/master`. **SPA via ingress:** `https://localhost/oauth/realms/master`. Must match JWT `iss`. |
 | `KEYCLOAK_AUDIENCE` | Your client id (e.g. `internal-comm-api`) |
-| `KEYCLOAK_JWKS_URL` | e.g. `http://localhost:8090/realms/master/protocol/openid-connect/certs` (or omit to derive from issuer) |
+| `KEYCLOAK_JWKS_URL` | Optional; defaults to `{issuer}/protocol/openid-connect/certs`. **Merged ingress** sets an internal **`http://keycloak:8080/oauth/realms/.../certs`** URL on the **`api`** service (see **`docker-compose.ingress.yml`**). |
 | `KEYCLOAK_READY_URL` | Optional. Compose **`api`** uses `http://keycloak:9000/health/ready`. For host API, unset and `/ready` probes `KEYCLOAK_ISSUER`, or point at a reachable URL on **8090**. |
 
 Unset `KEYCLOAK_ISSUER` if you only want health/openapi without `/v1`.
@@ -87,7 +96,7 @@ go run ./cmd/migrate -direction up
 
 #### 4. Keycloak (only if you enabled `KEYCLOAK_ISSUER`)
 
-1. Open **http://localhost:8090/admin/** (or **https://localhost/oauth/admin/** when using ingress).
+1. Open **http://localhost:8090/admin/** when using **`docker-compose.yml` only**. With **ingress** merged in, use **`https://localhost/oauth/admin/...`** (published **8090** then uses **`/oauth/...`** paths — see keycloak-browser doc).
 2. Create or select a **realm** (e.g. `master` matches the example issuer).
 3. Create an OIDC **client** whose **audience** / **azp** matches `KEYCLOAK_AUDIENCE`.
 4. Enable **Direct access grants** if you use password grant (e.g. Postman).
@@ -112,7 +121,7 @@ go run ./cmd/server
 - Liveness: `GET http://localhost:8080/health`
 - Readiness: `GET http://localhost:8080/ready`
 
-**Note:** The default **ingress** profile sends `/api` to the **`api` container**, not to a process on your machine. For a host-run API, call **`http://localhost:8080`** directly (no `/api` prefix). To put a host API behind nginx you would change `deploy/docker/nginx/nginx.conf` to proxy to `host.docker.internal:8080` (or your OS equivalent).
+**Note:** With **ingress**, the public API base is **`https://localhost/api`** (not your host `go run` port). For a host-run API behind nginx you would point nginx at `host.docker.internal:8080` (or your OS equivalent).
 
 ---
 
@@ -149,39 +158,37 @@ Or run a one-off migrate container if you add one; today the repo expects **`mak
 - API (direct to container publish): **http://localhost:8080** — e.g. `/docs`, `/health`, `/ready`, `/v1/*` with a valid JWT.
 - Keycloak (direct HTTP): **http://localhost:8090/** (e.g. `/realms/master/...`, admin **`/admin/`**).
 
-The **`api`** service defaults to **`KEYCLOAK_ISSUER=http://localhost:8090/realms/master`** (direct). If your SPA uses **only** **`https://localhost/oauth/...`**, change it to **`https://localhost/oauth/realms/master`** in `docker-compose.yml` (or override via env) so JWT `iss` matches.
+The **`api`** service in **`docker-compose.yml`** uses **`KEYCLOAK_ISSUER=http://localhost:8090/realms/master`**. When you merge **`docker-compose.ingress.yml`**, that overlay switches issuer and JWKS to **`https://localhost/oauth/...`**.
 
 ---
 
-### Optional: TLS ingress (nginx)
+### TLS ingress (second Compose file)
 
-Terminates TLS on **443**; HTTP **80** redirects to HTTPS. Routes:
+Use **`docker-compose.ingress.yml`** **with** **`docker-compose.yml`** (do not run the ingress file alone).
 
-- **`https://<host>/api/...`** → Go API (**`api`** service, prefix `/api` stripped → backend paths like `/v1/...`, `/docs`, `/health`).
-- **`https://<host>/oauth/...`** → Keycloak at **`keycloak:8080/`** ( **`/oauth`** stripped; standard **`/realms/...`** on the app port).
+- **`https://<host>/api/...`** → **`api:8080`** with the **`/api`** prefix stripped.
+- **`https://<host>/oauth/...`** → **`keycloak:8080/oauth/...`** with **`/oauth` preserved**. The overlay sets **`KC_HTTP_RELATIVE_PATH=/oauth`** and **`KC_HOSTNAME=https://localhost/oauth`** so TLS termination at nginx still produces correct admin-console and OIDC URLs.
 
-Requires TLS files on the host (paths in `docker-compose.yml` under **`ingress`**, e.g. `C:/Users/Admin/cert.pem` and `key.pem`). Profile: **`ingress`**.
+Cert paths: **`docker-compose.ingress.yml`** (defaults `C:/Users/Admin/cert.pem`, `key.pem` — edit for your machine). Use **`--profile app`** so **`api`** and **`ingress`** start (the ingress service is declared with **`profiles: ["app"]`** in the overlay so Compose stays valid).
 
 ```bash
-docker compose --profile app --profile ingress up -d --build
+docker compose -f docker-compose.yml -f docker-compose.ingress.yml --profile app up -d --build
 ```
 
-Then use **https://localhost/api/docs** and **https://localhost/oauth/realms/...** (admin: **https://localhost/oauth/admin/**). WebSocket example: **`wss://localhost/api/v1/ws?access_token=...`**.
+**https://localhost/api/docs**, **https://localhost/oauth/** (redirect to **`/oauth/admin/...`** is normal). WebSocket: **`wss://localhost/api/v1/ws?access_token=...`**.
 
-**404 on `https://localhost/admin/` (no `/oauth`):** Keycloak often responds with path-absolute URLs such as **`/admin`**, **`/realms/...`**, **`/resources/...`**. The browser turns those into **`https://localhost/admin`**, but only **`/oauth/...`** is proxied. Nginx redirects **`/admin`**, **`/realms/`**, and **`/resources/`** to the same path under **`/oauth/`**. Open the console at **`https://localhost/oauth/admin/`** and use **`https://localhost/oauth/...`** in SPA authority / discovery URLs.
+**Troubleshooting:** Clear site data for **`https://localhost`** after changing Keycloak or nginx. Admin UI stuck loading usually meant nginx and Keycloak disagreed on **`/oauth`**; this split uses **matching** relative path + **`proxy_pass .../oauth/`**. **`502`:** wait for Keycloak health; check **`docker compose logs keycloak`**. Debug: **`docker compose exec ingress wget -qO- http://keycloak:8080/oauth/realms/master/.well-known/openid-configuration`**.
 
-If the admin console shows **ERR_TOO_MANY_REDIRECTS**: (1) **Do not** set **`KC_HTTP_RELATIVE_PATH`** on Keycloak while nginx **strips** **`/oauth`** (that mismatch makes Keycloak redirect forever). This repo’s compose keeps Keycloak at **`/`** and relies on **`X-Forwarded-Prefix`**. (2) Clear **cookies** for **`https://localhost`**. (3) Ensure **`KC_PROXY_HEADERS=xforwarded`** and **`KC_HTTP_ENABLED=true`**; if redirects are still wrong, uncomment **`KC_HOSTNAME=https://localhost`** (hostname only, no **`/oauth`** path). Nginx rewrites common **`http://…`** `Location` headers to **`https://$host/oauth/`**. After changing env: **`docker compose up -d --force-recreate keycloak`** and reload nginx if needed.
+**Switching** direct ↔ ingress with the same **`keycloak_data`** volume can leave bad hostname metadata; for dev you can drop that volume.
 
-If nginx shows **502 Bad Gateway** on **`/oauth`** or **`/api`**: (1) Start **both** profiles so the **`api`** service exists: `docker compose --profile app --profile ingress up -d`. (2) Wait **1–2 minutes** after Keycloak starts. (3) Check **`docker compose logs keycloak`** and **`docker compose ps`**. (4) From the ingress container, **`wget -qO- http://keycloak:8080/realms/master/.well-known/openid-configuration --timeout=5`** should return JSON when Keycloak is up (backend path has **no** `/oauth` prefix).
+**Profiles**
 
-**Profiles reference**
-
-| Profile | What it adds |
-|--------|----------------|
-| *(default)* | `postgres`, `redis`, `minio`, `keycloak` |
-| `app` | **`api`** (Go HTTP server) |
-| `ingress` | **nginx** TLS reverse proxy (needs cert files on disk) |
-| `livekit` | LiveKit SFU (optional; see `docker-compose.yml`) |
+| Profile | Where | What it adds |
+|--------|--------|----------------|
+| *(default)* | base compose | `postgres`, `redis`, `minio`, `keycloak` |
+| `app` | base compose | **`api`** (Go HTTP on **8080**) |
+| `app` | **`docker-compose.ingress.yml`** | **`ingress`** (nginx **80/443**) — only when both files are merged |
+| `livekit` | base compose | LiveKit SFU (optional) |
 
 ---
 
@@ -207,7 +214,7 @@ docker compose --profile app up -d --build
 **Docker API + TLS ingress**
 
 ```bash
-docker compose --profile app --profile ingress up -d --build
+docker compose -f docker-compose.yml -f docker-compose.ingress.yml --profile app up -d --build
 ```
 
 ## Environment variables
@@ -226,7 +233,7 @@ See **[`.env.example`](.env.example)** for the full list and comments. The proce
 | `KEYCLOAK_READY_URL` | Optional; URL for `/ready` Keycloak GET. Keycloak 26 serves `/health/ready` on **port 9000** (management) by default — use e.g. `http://keycloak:9000/health/ready` in Compose when `KEYCLOAK_ISSUER` is a host URL |
 | `KEYCLOAK_AUDIENCE` | Required with issuer; must match token `aud` or `azp` |
 | `KEYCLOAK_JWKS_URL` | Optional; defaults to `{issuer}/protocol/openid-connect/certs` |
-| `OPENAPI_PUBLIC_BASE_URL` | Optional; absolute API base for OpenAPI/Swagger (no trailing slash). If unset, derived from `Host` and `X-Forwarded-*` (set **`X-Forwarded-Prefix: /api`** on your ingress for path-prefixed routes). |
+| `OPENAPI_PUBLIC_BASE_URL` | Optional; absolute API base for OpenAPI “servers” + Swagger “Try it out” (no trailing slash). **Ingress overlay** sets **`https://localhost/api`**. If unset on the server, derived from `Host` and `X-Forwarded-*` (nginx sends **`X-Forwarded-Prefix: /api`** for the API location). |
 
 ## Makefile
 
@@ -243,22 +250,26 @@ Windows: use **`make.cmd`** or **`scripts/ps/dev.ps1`** if GNU Make is not insta
 ## Project layout
 
 ```
-cmd/server/       # HTTP server entrypoint
-cmd/migrate/      # DB migrations CLI
-internal/auth/    # JWKS, JWT validation, bearer middleware
-internal/channel/ # Channel repository
-internal/config/  # Env loading
-internal/dbmigrate/ # Embedded migrations
-internal/httpserver/ # Routes, OpenAPI/Swagger UI, WebSocket stub
-internal/user/    # User repository (Keycloak sub upsert)
-docs/             # Keycloak + client notes
-output/           # Implementation plan and dated progress specs
+cmd/server/            # HTTP server entrypoint
+cmd/migrate/           # DB migrations CLI
+deploy/docker/nginx/   # TLS ingress (used with docker-compose.ingress.yml)
+internal/apiembed/     # Embedded OpenAPI YAML
+internal/auth/         # JWKS, JWT validation, bearer middleware
+internal/channel/      # Channels store + repository
+internal/chat/         # Messages store, cursor pagination, repository
+internal/config/       # Env loading
+internal/dbmigrate/    # Embedded SQL migrations
+internal/httpserver/   # Routes, health/ready, OpenAPI/Swagger, channels, messages, WebSocket
+internal/user/         # User sync / repository (Keycloak `sub` upsert)
+docs/                  # Keycloak + client notes
+output/                # Implementation plan, API integration guides, Postman packs, progress specs
 ```
 
 ## Documentation
 
 - [docs/keycloak-flutter.md](docs/keycloak-flutter.md) — mobile / public client tokens, `aud` vs `azp`  
-- [docs/keycloak-browser.md](docs/keycloak-browser.md) — browser sessions and OIDC flow  
+- [docs/keycloak-browser.md](docs/keycloak-browser.md) — browser sessions, OIDC discovery (direct vs ingress), CORS  
+- [output/api-guide/](output/api-guide/) — dated client integration guides (web/mobile vs direct vs TLS ingress)  
 - [output/backend-golang-implementation-plan.md](output/backend-golang-implementation-plan.md) — roadmap checklists  
 
 ## CI

@@ -1,0 +1,47 @@
+# TLS ingress overlay — use WITH docker-compose.yml (do not use alone).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ingress.yml --profile app up -d --build
+# Ingress is in profile "app" so it starts with the API (nginx needs the api hostname).
+#
+# Public URLs:
+#   https://localhost/api/...  → API (prefix stripped)
+#   https://localhost/oauth/... → Keycloak (path kept; Keycloak runs with KC_HTTP_RELATIVE_PATH=/oauth)
+#
+# Requires TLS cert/key paths below. Change host in KC_HOSTNAME if you use a hostname other than localhost.
+#
+# Switching from direct-only to ingress (or back) with the same keycloak_data volume can leave stale
+# hostname settings in Keycloak; if the admin console misbehaves: docker compose down && docker volume rm …/keycloak_data (dev only).
+
+services:
+  keycloak:
+    environment:
+      # Same public path as the browser (/oauth/...). Nginx forwards /oauth/... → keycloak:8080/oauth/...
+      KC_HTTP_RELATIVE_PATH: /oauth
+      KC_HOSTNAME: https://localhost/oauth
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      # Inherit KC_BOOTSTRAP_*, KC_DB_*, KC_HEALTH_ENABLED from base compose (merge).
+
+  api:
+    environment:
+      KEYCLOAK_ISSUER: https://localhost/oauth/realms/master
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/oauth/realms/master/protocol/openid-connect/certs
+      OPENAPI_PUBLIC_BASE_URL: https://localhost/api
+
+  ingress:
+    profiles: ["app"]
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - C:/Users/Admin/cert.pem:/etc/nginx/certs/cert.pem:ro
+      - C:/Users/Admin/key.pem:/etc/nginx/certs/key.pem:ro
+      - C:/Users/Admin/sanf.cnf:/etc/nginx/ssl/sanf.cnf:ro
+    # Nginx resolves the hostname `api` at startup — the API container must exist (use --profile app).
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      api:
+        condition: service_started

@@ -21,7 +21,7 @@ Use **one** column consistently: paths below are **relative to the API base** (n
 | **Example REST** | `GET http://localhost:8080/v1/me` | `GET https://<host>/api/v1/me` |
 | **WebSocket** | `ws://localhost:8080/v1/ws?access_token=<JWT>` | `wss://<host>/api/v1/ws?access_token=<JWT>` |
 
-**Ingress details:** The repo’s optional profile proxies **`/api/...`** to the **container** API and strips the prefix so the Go process still sees **`/health`**, **`/v1/...`**, etc. **`https://<host>/oauth/...`** maps to Keycloak at **`/`** on the Keycloak container (nginx strips **`/oauth`** and sets **`X-Forwarded-Prefix`**). See the root **`README.md`**.
+**Ingress details:** Merge **`docker-compose.ingress.yml`**: **`/api/...`** is stripped to the Go API; **`/oauth/...`** is forwarded to Keycloak with the **`/oauth`** prefix kept (**`KC_HTTP_RELATIVE_PATH=/oauth`**). See root **`README.md`**.
 
 **Host `go run`:** The API listens on **`HTTP_ADDR`** (often `:8080`). That process is **not** behind `/api` unless you add your own reverse proxy. Do not prepend `/api` when calling `http://localhost:8080` directly.
 

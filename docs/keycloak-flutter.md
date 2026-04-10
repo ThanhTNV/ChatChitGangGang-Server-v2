@@ -58,6 +58,6 @@ Alternative: `Sec-WebSocket-Protocol` value `bearer.<access_token>` (single prot
 
 ## Keycloak admin (local compose)
 
-- Admin console (direct): `http://localhost:8090/admin/` (ingress: `https://localhost/oauth/admin/`). Default bootstrap user from `docker-compose.yml`.
+- Admin: **`docker-compose.yml` only** → `http://localhost:8090/admin/`. **With `docker-compose.ingress.yml`** → `https://localhost/oauth/admin/` (or `http://localhost:8090/oauth/admin/` on the published port). Default bootstrap user from Compose.
 
 After creating the realm, set `KEYCLOAK_ISSUER` to match how clients obtain tokens: `http://localhost:8090/realms/<your-realm>` (direct) or `https://<host>/oauth/realms/<your-realm>` (ingress).

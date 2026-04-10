@@ -14,12 +14,14 @@ A user can have a **valid SSO session** at Keycloak but **no access token** in y
 
 ## OIDC discovery URL (this repo — direct vs ingress)
 
-Keycloak in Docker listens on **`http://localhost:8090`** with **standard** paths (**`/realms/...`** at the root). TLS **ingress** exposes the **same** server at **`https://<host>/oauth/...`**; nginx strips the `/oauth` prefix and sends **`X-Forwarded-Prefix: /oauth`** so Keycloak emits the right **`issuer`** for browsers.
+- **`docker-compose.yml` only:** Keycloak uses **root** paths on **8090** — **`/realms/...`**, **`/admin/...`**.
+- **`docker-compose.yml` + `docker-compose.ingress.yml`:** Keycloak runs with **`KC_HTTP_RELATIVE_PATH=/oauth`**. Nginx forwards **`https://localhost/oauth/...`** to **`http://keycloak:8080/oauth/...`** (prefix **kept**). Published **8090** then serves **`http://localhost:8090/oauth/realms/...`** (not `/realms/...` at the root).
 
-| How clients reach Keycloak | Discovery document (example realm `master`) | Typical JWT `iss` (must match API `KEYCLOAK_ISSUER`) |
-|----------------------------|---------------------------------------------|------------------------------------------------------|
-| **Direct** (no ingress) | `http://localhost:8090/realms/master/.well-known/openid-configuration` | `http://localhost:8090/realms/master` |
-| **TLS ingress** | `https://localhost/oauth/realms/master/.well-known/openid-configuration` | `https://localhost/oauth/realms/master` |
+| How clients reach Keycloak | Discovery (realm `master`) | Typical JWT `iss` (must match API `KEYCLOAK_ISSUER`) |
+|----------------------------|------------------------------|------------------------------------------------------|
+| **Direct** (`docker-compose.yml` only) | `http://localhost:8090/realms/master/.well-known/openid-configuration` | `http://localhost:8090/realms/master` |
+| **TLS ingress** (merged compose) | `https://localhost/oauth/realms/master/.well-known/openid-configuration` | `https://localhost/oauth/realms/master` |
+| **Same host, published 8090 + ingress stack** | `http://localhost:8090/oauth/realms/master/.well-known/openid-configuration` | still **`https://localhost/oauth/realms/master`** if users authenticate via HTTPS |
 
 Use the discovery URL that matches how **your SPA** talks to Keycloak, and set the API **`KEYCLOAK_ISSUER`** to the same **`issuer`** value from that JSON. You cannot mix token sources (direct vs ingress) against a single API issuer without re-login or a multi-issuer API change.
 
